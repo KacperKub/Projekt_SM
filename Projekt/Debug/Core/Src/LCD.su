@@ -1,0 +1,13 @@
+../Core/Src/LCD.c:17:13:software_delay	24	static,ignoring_inline_asm
+../Core/Src/LCD.c:35:6:LCD_init	56	static
+../Core/Src/LCD.c:74:6:LCD_send_4bits	16	static
+../Core/Src/LCD.c:90:6:LCD_send_8bits_twice_4bits	16	static
+../Core/Src/LCD.c:96:6:LCD_write_command	16	static
+../Core/Src/LCD.c:102:6:LCD_write_data	16	static
+../Core/Src/LCD.c:107:6:LCD_write_char	16	static
+../Core/Src/LCD.c:114:6:LCD_write_text	16	static
+../Core/Src/LCD.c:122:6:LCD_goto_xy	16	static
+../Core/Src/LCD.c:132:6:LCD_goto_line	16	static
+../Core/Src/LCD.c:137:6:LCD_printf_line	40	static
+../Core/Src/LCD.c:153:9:LCD_printf	32	static
+../Core/Src/LCD.c:167:6:LCD_create_custom_character	24	static
