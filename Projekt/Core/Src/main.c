@@ -62,11 +62,21 @@
 uint8_t Received[5];
 uint8_t Data[5];
 uint16_t msg_len;
+uint16_t Heater_PWM_Duty;
+uint16_t Fan_PWM_Duty;
 
 // Zmienne globalne float :
 float temperature_current;
 float temperature_reference;
 float temperature_error;
+float PWM_Control_Heater;
+float PWM_Control_Fan;
+const float Tp = 0.250;
+
+// Regulatory :
+
+arm_pid_instance_f32 PID1;
+arm_pid_instance_f32 PID2;
 
 /* USER CODE END PV */
 
@@ -85,21 +95,21 @@ void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
 	if(huart->Instance == USART3)
 	{
 		uint8_t tx_buffer[32];
-		float temperature_reference_UART; //zmienna lokalna temperatury referencyjnej
+		float temperature_reference_UART;   //zmienna lokalna temperatury referencyjnej
 
 		sscanf((char*)&Data[0], "%f", &temperature_reference_UART); //odczyt danych do tablicy
 
-		// Sprawdzenie zakresu temperatury <20,30>
-		if(temperature_reference_UART < 20.0 || temperature_reference_UART > 30.0)
+		// Sprawdzenie zakresu temperatury <20,40>
+		if(temperature_reference_UART < 20.0 || temperature_reference_UART > 40.0)
 		{
-			int resp_len = sprintf((char*)tx_buffer, "Temperatura referencyjna poza <20,30>\r\n"); //formatowanie wiadomości
-			HAL_UART_Transmit(&huart3, tx_buffer, resp_len, 10); //Wysyłanie
-			HAL_UART_Receive_IT(&huart3, Data, msg_len); //Odbieranie
+			int resp_len = sprintf((char*)tx_buffer, "Temperatura referencyjna poza <20,40>\r\n"); //formatowanie wiadomości
+			HAL_UART_Transmit(&huart3, tx_buffer, resp_len, 10);    //Wysyłanie
+			HAL_UART_Receive_IT(&huart3, Data, msg_len);    //Odbieranie
 		}
 		// Jeżeli temperatura jest w zakresie to ustawia temperaturę referencyjną i wyświetla ją również w terminalu
 		else
 		{
-			temperature_reference = temperature_reference_UART; //przypisanie temperatury
+			temperature_reference = temperature_reference_UART; //przypisanie temperatury referencyjnej przysłanej z UARTu
 			int resp_len = sprintf((char*)tx_buffer, "Temperatura referencyjna: %f\r\n", temperature_reference); //formatowanie wiadomości
 			HAL_UART_Transmit(&huart3, tx_buffer, resp_len, 10); //wysyłanie
 			HAL_UART_Receive_IT(&huart3, Data, msg_len); // odbiór
@@ -107,15 +117,15 @@ void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
 	}
 }
 
-//Obsługa timer TIM2
+//Obsługa timerów TIM2 i TIM5
 
 void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
 {
 
 	if(htim->Instance == TIM2) //TIM 2 wysyła co 1 sekundę odczytaną temperaturę i temperaturę referencyjną
 	{
-		char str_buffer[100]; //tablica lokalna do przesyłania wiadomości
-		int n; //zmienna lokalna do formatowania wiadomości
+		char str_buffer[100];   //tablica lokalna do przesyłania wiadomości
+		int n;  //zmienna lokalna do formatowania wiadomości
 
 		float temp_cur = BMP2_ReadTemperature_degC(&hbmp2_1); //Zmienna lokalna od obecnej temperatury
 		float temp_ref = temperature_reference; //Zmienna lokalna od obecnej temperatury referencyjnej
@@ -124,6 +134,65 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
 		str_buffer[n] = '\n';
 		HAL_UART_Transmit(&huart3, (uint8_t*)str_buffer, n+1, 1000); //Wysyłanie wiadomości
 	}
+
+	if(htim->Instance == TIM5) //TIM 5 odpowiedzialny jest za PWM
+	{
+		temperature_current = BMP2_ReadTemperature_degC(&hbmp2_1); //Odczyt temperatury z czujnika
+		temperature_error = temperature_reference - temperature_current; //Obliczenie wartości błędu temperatury
+		PWM_Control_Fan = 999.0*arm_pid_f32(&PID2, temperature_error); //Obliczanie wartości PWM wiatraka
+
+
+		if(temperature_current < temperature_reference)
+		{
+		PWM_Control_Heater = 999.0*arm_pid_f32(&PID1, temperature_error); //Obliczenie wartości PWM grzałki
+		//Limit PWM grzałki
+			if(PWM_Control_Heater < 0)
+			{
+				Heater_PWM_Duty = 0; //min
+			}
+			else if(PWM_Control_Heater > 999.0)
+			{
+				Heater_PWM_Duty = 999; //max
+			}
+		//Ustawienie PWM jeżeli jest w zakresie
+			else
+			{
+				Heater_PWM_Duty = (uint16_t)PWM_Control_Heater; //Przypisanie nowej wartości PWM
+			}
+			__HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_1, Heater_PWM_Duty); //Ustawienie nowej wartości PWM
+		}
+		else
+		{
+			Heater_PWM_Duty=0;  // Jeżeli obecna temperatura jest wyższa od referencyjnej to odłączamy grzałkę
+			__HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_1, Heater_PWM_Duty);  //Ustawienie nowej wartości PWM
+		}
+
+		if(temperature_current > temperature_reference)
+		{
+        //Limit PWM wentylatora
+			if(PWM_Control_Fan < 0)
+			{
+				Fan_PWM_Duty = 0;   //min
+			}
+			else if(PWM_Control_Fan > 999.0)
+			{
+				Fan_PWM_Duty = 999; //max
+			}
+		//Ustawienie PWM jeżeli jest w zakresie
+			else
+			{
+				Fan_PWM_Duty = (uint16_t)PWM_Control_Fan;   //Przypisanie nowej wartości PWM
+			}
+			__HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_2, Fan_PWM_Duty); //Ustawienie nowej wartości PWM
+		}
+		else
+		{
+			Fan_PWM_Duty = 0; // Jeżeli obecna temperatura jest niższa od referencyjnej to zatrzymujemy wentylator
+			__HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_2, Fan_PWM_Duty); //Ustawienie nowej wartości PWM
+		}
+	}
+}
+
 /* USER CODE END 0 */
 
 /**
@@ -157,15 +226,53 @@ int main(void)
   MX_USART3_UART_Init();	//USART Init
   MX_USB_OTG_FS_PCD_Init();
   MX_TIM2_Init();	//TIM2 : Wysyłanie wiadomości
+  MX_TIM3_Init();	//TIM3 : PWM
   MX_SPI4_Init();	//SPI4 Init
-
+  MX_TIM5_Init();	//TIM5 : Sterowanie grzałką i wentylatorem
   /* USER CODE BEGIN 2 */
 
   // Inicjalizacja czujnika BMP i ustawienie temperatury referencyjnej
 
 	BMP2_Init(&hbmp2_1);
 
-	temperature_reference = 30.00;
+	temperature_reference = 30.00;  //Automatycznie ustawiana temperatura referencyjna
+
+// Regulator PID : Grzałka
+
+	PID1.Kp = 1;
+	PID1.Ki = 0;
+	PID1.Kd = 0;
+	arm_pid_init_f32(&PID1, 1);
+
+// Regulator PID : Wentylator
+
+	PID2.Kp = 1;
+	PID2.Ki = 0;
+	PID2.Kd = 0;
+	arm_pid_init_f32(&PID2, 1);
+
+
+	msg_len = strlen("C000\r");
+
+// Start PWM : Grzałka
+
+	HAL_TIM_PWM_Start(&htim3, TIM_CHANNEL_1);
+	PWM_Control_Heater = 0;
+	__HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_1, PWM_Control_Heater);
+
+// Start PWM : Wentylator
+
+	HAL_TIM_PWM_Start(&htim3, TIM_CHANNEL_2);
+	PWM_Control_Fan = 0;
+	__HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_2, PWM_Control_Fan);
+
+// Start Timerów z przerwaniami
+
+	HAL_TIM_Base_Start_IT(&htim2);
+	HAL_TIM_Base_Start_IT(&htim5);
+
+// Odbiór UART z przerwaniami
+	HAL_UART_Receive_IT(&huart3, Data, msg_len);
 
   /* USER CODE END 2 */
 
