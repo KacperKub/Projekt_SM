@@ -30,12 +30,13 @@
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
+#define _USE_MATH_DEFINES
 #include <math.h>
 #include <stdint.h>
+
 #include "arm_math.h"
 #include "bmp2_config.h"
 #include "LCD.h"
-
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -57,6 +58,15 @@
 
 /* USER CODE BEGIN PV */
 
+// Zmienne globalne uint :
+uint8_t Received[5];
+uint8_t Data[5];
+uint16_t msg_len;
+
+// Zmienne globalne float :
+float temperature_current;
+float temperature_reference;
+float temperature_error;
 
 /* USER CODE END PV */
 
@@ -69,6 +79,51 @@ void SystemClock_Config(void);
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
 
+//Funkcja UART : Wysyłanie temperatury referencyjnej
+void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
+{
+	if(huart->Instance == USART3)
+	{
+		uint8_t tx_buffer[32];
+		float temperature_reference_UART; //zmienna lokalna temperatury referencyjnej
+
+		sscanf((char*)&Data[0], "%f", &temperature_reference_UART); //odczyt danych do tablicy
+
+		// Sprawdzenie zakresu temperatury <20,30>
+		if(temperature_reference_UART < 20.0 || temperature_reference_UART > 30.0)
+		{
+			int resp_len = sprintf((char*)tx_buffer, "Temperatura referencyjna poza <20,30>\r\n"); //formatowanie wiadomości
+			HAL_UART_Transmit(&huart3, tx_buffer, resp_len, 10); //Wysyłanie
+			HAL_UART_Receive_IT(&huart3, Data, msg_len); //Odbieranie
+		}
+		// Jeżeli temperatura jest w zakresie to ustawia temperaturę referencyjną i wyświetla ją również w terminalu
+		else
+		{
+			temperature_reference = temperature_reference_UART; //przypisanie temperatury
+			int resp_len = sprintf((char*)tx_buffer, "Temperatura referencyjna: %f\r\n", temperature_reference); //formatowanie wiadomości
+			HAL_UART_Transmit(&huart3, tx_buffer, resp_len, 10); //wysyłanie
+			HAL_UART_Receive_IT(&huart3, Data, msg_len); // odbiór
+		}
+	}
+}
+
+//Obsługa timer TIM2
+
+void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
+{
+
+	if(htim->Instance == TIM2) //TIM 2 wysyła co 1 sekundę odczytaną temperaturę i temperaturę referencyjną
+	{
+		char str_buffer[100]; //tablica lokalna do przesyłania wiadomości
+		int n; //zmienna lokalna do formatowania wiadomości
+
+		float temp_cur = BMP2_ReadTemperature_degC(&hbmp2_1); //Zmienna lokalna od obecnej temperatury
+		float temp_ref = temperature_reference; //Zmienna lokalna od obecnej temperatury referencyjnej
+		n = sprintf(str_buffer, "{\"Current Temperature\": %2.02f *C} {\"Reference Temperature\": %2.02f *C}\r\n", temp_cur, temp_ref);
+
+		str_buffer[n] = '\n';
+		HAL_UART_Transmit(&huart3, (uint8_t*)str_buffer, n+1, 1000); //Wysyłanie wiadomości
+	}
 /* USER CODE END 0 */
 
 /**
@@ -98,17 +153,19 @@ int main(void)
   /* USER CODE END SysInit */
 
   /* Initialize all configured peripherals */
-
   MX_GPIO_Init(); //GPIO Init
   MX_USART3_UART_Init();	//USART Init
   MX_USB_OTG_FS_PCD_Init();
   MX_TIM2_Init();	//TIM2 : Wysyłanie wiadomości
-  MX_TIM3_Init();	//TIM3 : PWM
   MX_SPI4_Init();	//SPI4 Init
-  MX_TIM5_Init();	//TIM5 : Sterowanie grzałką i wentylatorem
-  MX_TIM7_Init();	//TIM7 : Sterowanie LCD
 
   /* USER CODE BEGIN 2 */
+
+  // Inicjalizacja czujnika BMP i ustawienie temperatury referencyjnej
+
+	BMP2_Init(&hbmp2_1);
+
+	temperature_reference = 30.00;
 
   /* USER CODE END 2 */
 
@@ -116,7 +173,6 @@ int main(void)
   /* USER CODE BEGIN WHILE */
 	while (1)
 	{
-
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
