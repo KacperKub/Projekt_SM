@@ -203,9 +203,8 @@ void LCD_print_temperature()
 	LCD_goto_line(1);
 	LCD_write_text("Temp cur:");
 	LCD_printf("%2.02f",temperature_current);
-	LCD_write_text(" C");
+	LCD_printf(" C");
 	LCD_goto_line(2);
-	HAL_Delay(100);
 }
 
 /* USER CODE END 0 */
