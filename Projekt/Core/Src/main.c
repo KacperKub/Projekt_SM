@@ -141,7 +141,7 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
 	    PWM_Min=0.0;
 		temperature_current = BMP2_ReadTemperature_degC(&hbmp2_1); //Odczyt temperatury z czujnika
 		temperature_error = temperature_reference - temperature_current; //Obliczenie wartości błędu temperatury
-		PWM_Control_Fan = PWM_Max*arm_pid_f32(&PID2, temperature_error); //Obliczanie wartości PWM wiatraka
+
 
 
 		if(temperature_current < temperature_reference)
@@ -171,7 +171,7 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
 
 		if(temperature_current > temperature_reference)
 		{
-
+            PWM_Control_Fan = PWM_Max*arm_pid_f32(&PID2, temperature_error); //Obliczanie wartości PWM wiatraka
 			if(PWM_Control_Fan < PWM_Min)
 			{
 				Fan_PWM_Duty = 0;
@@ -193,18 +193,6 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
 			__HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_2, Fan_PWM_Duty);
 		}
 	}
-}
-
-void LCD_print_temperature()
-{
-	LCD_write_text("Temp ref:");
-	LCD_printf("%2.02f",temperature_reference);
-	LCD_printf(" C");
-	LCD_goto_line(1);
-	LCD_write_text("Temp cur:");
-	LCD_printf("%2.02f",temperature_current);
-	LCD_printf(" C");
-	LCD_goto_line(2);
 }
 
 /* USER CODE END 0 */
@@ -243,7 +231,7 @@ int main(void)
   MX_TIM3_Init();	//TIM3 : PWM
   MX_SPI4_Init();	//SPI4 Init
   MX_TIM5_Init();	//TIM5 : Sterowanie grzałką i wentylatorem
-  MX_TIM7_Init();	//TIM7 : Sterowanie LCD
+//  MX_TIM7_Init();	//TIM7 : Sterowanie LCD
   /* USER CODE BEGIN 2 */
 
   // Inicjalizacja czujnika BMP i ustawienie temperatury referencyjnej
@@ -260,12 +248,12 @@ int main(void)
 	arm_pid_init_f32(&PID1, 1);
 
 // Regulator PID : Wentylator
+// Ze względu na nieznajomość transmitancji obiektu nastawy regulatora są NIEOPTYMALNE
 
 	PID2.Kp = 1;
 	PID2.Ki = 0.1*Tp;
 	PID2.Kd = 0;
 	arm_pid_init_f32(&PID2, 1);
-
 
 	msg_len = strlen("C000\r");
 
@@ -290,19 +278,12 @@ int main(void)
 // Odbiór UART z przerwaniami
 	HAL_UART_Receive_IT(&huart3, Data, msg_len);
 
-
-// Inicjalizacja LCD
-
-	LCD_init();
-	LCD_write_command(LCD_CLEAR_INSTRUCTION);
   /* USER CODE END 2 */
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
 	while (1)
 	{
-		LCD_print_temperature();
-		HAL_Delay(1000);
 
     /* USER CODE END WHILE */
 
